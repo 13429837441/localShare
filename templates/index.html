@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>局域网文件互传工具</title>
+  <!-- Dropzone CSS -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='lib/dropzone.min.css') }}" />
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  
+  <!-- 添加Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script>
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
+                    primary: '#ace9e5',
+                    secondary: '#3b82f6',
+                    accent: '#60a5fa',
+                    light: '#dbeafe',
+                    dark: '#1e3a8a'
+                }
+            }
+        }
+    }
+  </script>
+  
+  <style type="text/tailwindcss">
+    @layer utilities {
+        .floating-button {
+            transition: all 0.3s ease;
+        }
+        .floating-button:hover {
+            transform: scale(1.1);
+        }
+        .floating-button.active {
+            transform: rotate(90deg);
+        }
+    }
+  </style>
+  
+  <style>
+
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <header>
+    <h1><i class="fas fa-share-alt"></i> 局域网文件互传</h1>
+    <p>扫描二维码，手机快速上传/下载</p>
+  </header>
+
+  <!-- 二维码区域 -->
+  <div class="qrcode-box">
+    <div id="qrcode"></div>
+    <p>📱 扫码访问本页</p>
+  </div>
+
+  <!-- 拖拽上传区 -->
+  <form action="/upload" class="dropzone" id="myDropzone"></form>
+
+  <!-- 文件列表 -->
+  <section class="file-list">
+    <h2><i class="fas fa-folder-open">文件列表</i>
+      <form action="/clear" method="post">
+        <button type="submit" class="btn-clear shadow-sm btn-outline-danger" onclick="return confirm('确定要清空所有文件吗？')">🗑️ 一键清空</button>
+      </form>
+    </h2>
+    <div id="fileTableBody">
+      {% if files %}
+        <ul>
+          {% for file in files %}
+            <li>
+              <div class="file-item">
+                <div class="file-icon">
+                  <i class="far {{ file.icon }} icon-large me-3"></i>
+                </div>
+                <div class="file-info">
+                  <a href="{{ file.url }}" download>{{ file.name }}</a>
+                  <small>{{ file.size }} · {{ file.mtime }}</small>
+                </div>
+                <a href="{{ file.url }}" class="btn-download" download>
+                  <i class="fas fa-download"></i>
+                </a>
+              </div>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty">暂无文件</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+<!-- 消息悬浮球 -->
+<div class="fixed bottom-5 right-5 z-50">
+    <button id="message-button" class="floating-button bg-primary hover:#ace9e5 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center">
+        <i class="fas fa-comments text-xl"></i>
+        <span id="message-badge" class="notification-badge hidden">0</span>
+    </button>
+    
+    <!-- 消息面板 -->
+    <div id="message-panel" class="hidden absolute bottom-16 right-0 w-80 bg-white rounded-xl shadow-2xl overflow-hidden">
+        <div class="bg-primary text-white p-4 flex justify-between items-center">
+            <h3 class="font-bold">实时消息</h3>
+            <button id="close-message-panel" class="text-white hover:text-gray-200">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div id="message-container" class="message-container p-4 bg-gray-50">
+            <!-- 消息将通过JavaScript动态生成 -->
+        </div>
+        
+        <div class="p-4 border-t">
+            <form id="message-form" class="flex">
+                <input type="text" id="message-input" placeholder="输入消息..." class="flex-1 border border-gray-300 rounded-l-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary">
+                <button type="submit" class="bg-primary hover:#ace9e5 text-white px-4 py-2 rounded-r-md transition-colors">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 通知提示 -->
+<div id="notification" class="fixed top-4 right-4 bg-white rounded-lg shadow-lg p-4 transform translate-x-full transition-transform duration-300 z-50 max-w-sm">
+    <div class="flex items-start">
+        <div id="notification-icon" class="flex-shrink-0 text-green-500">
+            <i class="fas fa-check-circle text-xl"></i>
+        </div>
+        <div class="ml-3 flex-1">
+            <p id="notification-title" class="text-sm font-medium text-gray-900">操作成功</p>
+            <p id="notification-message" class="mt-1 text-sm text-gray-500">文件上传成功</p>
+        </div>
+        <button id="close-notification" class="ml-4 text-gray-400 hover:text-gray-500">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+</div>
+
+<!-- QRCode.js -->
+<script src="{{ url_for('static', filename='lib/qrcode.min.js') }}"></script>
+<!-- Dropzone JS -->
+<script src="{{ url_for('static', filename='lib/dropzone.min.js') }}"></script>
+<!-- socketIO JS -->
+<script src="{{ url_for('static', filename='lib/socket.io.min.js') }}"></script>
+<script>
+  // 生成二维码
+  new QRCode(document.getElementById("qrcode"), {
+    text: "{{ server_url }}",
+    width: 180,
+    height: 180
+  });
+
+  // Dropzone 配置
+  Dropzone.options.myDropzone = {
+    paramName: "file",
+    maxFilesize: 1024, // MB
+    timeout: 600000,
+    dictDefaultMessage: "📁 拖拽文件到这里，或点击选择文件",
+    dictFallbackMessage: "您的浏览器不支持拖拽上传",
+    dictInvalidFileType: "不支持此文件类型",
+    accept: function(file, done) {
+      done();
+    },
+    init: function() {
+      this.on("success", function(file, response) {
+        console.log("上传成功:", response);
+        setTimeout(() => location.reload(), 1000);
+      });
+      this.on("error", function(file, message) {
+        alert("上传失败: " + message);
+      });
+    }
+  };
+
+  // 初始化SocketIO
+  var socket = io();
+  var clientId = ''; // 存储客户端ID
+  
+  // 页面加载完成后绑定事件
+  document.addEventListener('DOMContentLoaded', function() {
+      // 当有新文件上传时，通知通知所有客户端刷新列表
+      socket.on('file_updated', function() {
+        refreshFileList();
+      });
+      
+      // 连接成功，获取客户端ID
+      socket.on('connection_response', function(data) {
+        console.log('Connected to server:', data.message);
+        clientId = data.client_id;
+        console.log('Client ID:', clientId);
+      });
+      
+      // 初始化消息面板
+      initMessagePanel();
+      
+      // 初始化通知
+      initNotification();
+  });
+
+  // 刷新文件列表
+  function refreshFileList() {
+      fetch('/api/files')
+          .then(response => response.json())
+          .then(data => {
+              var tableBody = document.getElementById('fileTableBody');
+              var fileInnerHTML = '';
+              tableBody.innerHTML = '';
+
+              if (data.files.length === 0) {
+                  tableBody.innerHTML = `
+                    <p class="empty">暂无文件</p>
+                  `;
+                  return;
+              }
+
+              fileInnerHTML += '<ul>';
+              data.files.forEach(file => {
+                fileInnerHTML += `
+                  <li>
+                    <div class="file-item">
+                      <div class="file-icon">
+                        <i class="far ${ file.icon } icon-large me-3"></i>
+                      </div>
+                      <div class="file-info">
+                        <a href="${ file.url }" download>${ file.name }</a>
+                        <small>${ file.size } · ${ file.mtime }</small>
+                      </div>
+                      <a href="${ file.url }" class="btn-download" download>
+                        <i class="fas fa-download"></i>
+                      </a>
+                    </div>
+                  </li>
+                `;
+              });
+              fileInnerHTML += '</ul>';
+              tableBody.innerHTML = fileInnerHTML;
+          });
+  }
+  
+  // 消息面板相关变量
+  let unreadMessages = 0;
+  
+  // 初始化消息面板
+  function initMessagePanel() {
+      const messageButton = document.getElementById('message-button');
+      const messagePanel = document.getElementById('message-panel');
+      const closeMessagePanel = document.getElementById('close-message-panel');
+      const messageForm = document.getElementById('message-form');
+      const messageInput = document.getElementById('message-input');
+      
+      // 打开/关闭消息面板
+      messageButton.addEventListener('click', function() {
+          messagePanel.classList.toggle('hidden');
+          messageButton.classList.toggle('active');
+          
+          // 如果打开消息面板，重置未读消息计数
+          if (!messagePanel.classList.contains('hidden')) {
+              unreadMessages = 0;
+              updateMessageBadge();
+          }
+      });
+      
+      // 关闭消息面板
+      closeMessagePanel.addEventListener('click', function() {
+          messagePanel.classList.add('hidden');
+          messageButton.classList.remove('active');
+      });
+      
+      // 发送消息
+      messageForm.addEventListener('submit', function(e) {
+          e.preventDefault();
+          const message = messageInput.value.trim();
+          
+          if (message) {
+              // 发送消息到服务器，包含客户端ID
+              socket.emit('send_message', { 
+                  message: message,
+                  client_id: clientId
+              });
+              
+              // 在本地地显示消息
+              const timestamp = new Date().toLocaleString();
+              addMessage(message, timestamp, true);
+              
+              // 清空输入框
+              messageInput.value = '';
+          }
+      });
+      
+      // 监听新消息
+      socket.on('new_message', function(data) {
+          console.log('New message:', data);
+          
+          // 如果是自己发送的消息，则忽略
+          if (data.client_id === clientId) {
+              console.log('Ignoring own message');
+              return;
+          }
+          
+          // 显示收到的消息
+          addMessage(data.message, data.timestamp, false);
+          
+          // 如果消息面板未打开，显示未读消息徽章
+          if (messagePanel.classList.contains('hidden')) {
+              unreadMessages++;
+              updateMessageBadge();
+              showNotification('info', '新消息', '收到一条新消息');
+          }
+      });
+  }
+  
+  // 添加消息到消息面板
+  function addMessage(message, timestamp, isSent) {
+      const messageContainer = document.getElementById('message-container');
+      const messageBubble = document.createElement('div');
+      const messageClass = isSent ? 'sent' : 'received';
+      
+      messageBubble.className = `message-bubble ${messageClass}`;
+      messageBubble.innerHTML = `
+          <p class="text-sm text-break">${message}</p>
+          <p class="text-xs mt-1 opacity-70 text-right">${timestamp}</p>
+      `;
+      
+      messageContainer.appendChild(messageBubble);
+      
+      // 滚动到底部
+      messageContainer.scrollTop = messageContainer.scrollHeight;
+  }
+  
+  // 更新消息徽章
+  function updateMessageBadge() {
+      const messageBadge = document.getElementById('message-badge');
+      
+      if (unreadMessages > 0) {
+          messageBadge.textContent = unreadMessages;
+          messageBadge.classList.remove('hidden');
+      } else {
+          messageBadge.classList.add('hidden');
+      }
+  }
+  
+  // 初始化通知
+  function initNotification() {
+      const notification = document.getElementById('notification');
+      const closeNotification = document.getElementById('close-notification');
+      
+      closeNotification.addEventListener('click', function() {
+          hideNotification();
+      });
+      
+      // 点击通知外部关闭
+      notification.addEventListener('click', function(e) {
+          if (e.target === notification) {
+              hideNotification();
+          }
+      });
+  }
+  
+  // 显示通知
+  function showNotification(type, title, message) {
+      const notification = document.getElementById('notification');
+      const notificationTitle = document.getElementById('notification-title');
+      const notificationMessage = document.getElementById('notification-message');
+      const notificationIcon = document.getElementById('notification-icon');
+      
+      // 设置通知类型
+      notificationIcon.className = 'flex-shrink-0';
+      
+      if (type === 'success') {
+          notificationIcon.innerHTML = '<i class="fas fa-check-circle text-xl text-green-500"></i>';
+      } else if (type === 'error') {
+          notificationIcon.innerHTML = '<i class="fas fa-exclamation-circle text-xl text-red-500"></i>';
+      } else if (type === 'info') {
+          notificationIcon.innerHTML = '<i class="fas fa-info-circle text-xl text-blue-500"></i>';
+      }
+      
+      // 设置通知内容
+      notificationTitle.textContent = title;
+      notificationMessage.textContent = message;
+      
+      // 显示通知
+      notification.classList.remove('translate-x-full');
+      
+      // 3秒后自动隐藏
+      setTimeout(() => {
+          hideNotification();
+      }, 3000);
+  }
+  
+  // 隐藏通知
+  function hideNotification() {
+      const notification = document.getElementById('notification');
+      notification.classList.add('translate-x-full');
+  }
+</script>
+
+</body>
+</html>
